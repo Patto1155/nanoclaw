@@ -1,0 +1,80 @@
+name: Upstream Sync
+
+on:
+  schedule:
+    # Every Monday at 06:00 UTC
+    - cron: "0 6 * * 1"
+  workflow_dispatch: {}
+
+jobs:
+  sync:
+    name: Sync from qwibitai/nanoclaw
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: git remote add upstream https://github.com/qwibitai/nanoclaw.git
+
+      - name: Fetch upstream
+        run: git fetch upstream
+
+      - name: Create sync branch
+        id: branch
+        run: |
+          BRANCH="upstream-sync/$(date +%Y-%m-%d)"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          git checkout -b "$BRANCH"
+
+      - name: Attempt merge
+        id: merge
+        run: |
+          if git merge upstream/main --no-edit; then
+            echo "merged=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+            git merge --abort || true
+          fi
+
+      - name: Push sync branch
+        if: steps.merge.outputs.merged == 'true'
+        run: git push origin "${{ steps.branch.outputs.branch }}"
+
+      - name: Open PR (no auto-merge)
+        if: steps.merge.outputs.merged == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr create \
+            --base main \
+            --head "${{ steps.branch.outputs.branch }}" \
+            --title "chore: upstream sync $(date +%Y-%m-%d)" \
+            --body "$(cat <<'EOF'
+          ## Upstream sync
+
+          Automated weekly merge from [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw) → \`main\`.
+
+          **Review before merging.** CI must pass. No auto-merge.
+
+          Triggered by: \`upstream-sync.yml\`
+          EOF
+          )"
+
+      - name: Notify on conflict
+        if: steps.merge.outputs.merged == 'false'
+        run: |
+          echo "::warning::Upstream merge conflict detected. Run scripts/upgrade-upstream.sh locally to resolve."
+          exit 1

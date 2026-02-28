@@ -1,0 +1,25 @@
+services:
+  nanoclaw:
+    build:
+      context: ..
+      dockerfile: container/Dockerfile
+    image: nanoclaw:local
+    container_name: nanoclaw
+    restart: unless-stopped
+
+    # ── Runtime lives entirely on SSD (repo source) ──────────────────────
+    # Only persistence dirs are bind-mounted from HDD.
+    volumes:
+      - /mnt/hdd/logs/agents/nanoclaw:/app/logs
+      - /mnt/hdd/state/service-state/nanoclaw:/app/state
+      - /mnt/hdd/data/databases/nanoclaw:/app/data
+
+    environment:
+      - NODE_ENV=production
+
+    # ── Logging ──────────────────────────────────────────────────────────
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
